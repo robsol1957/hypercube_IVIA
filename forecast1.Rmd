@@ -1,0 +1,86 @@
+---
+title: "Untitled"
+output: html_document
+date: "2026-01-13"
+---
+
+```{r setup}
+knitr::opts_chunk$set(echo = TRUE)
+source("fns.R")
+```
+```{r wrangle}
+
+# OTC_Allergy_FY25 <- read_csv("data/5-01-2026_Transaction-Data-NSW-CWH-OTC-Allergy-FY25.csv")
+# site <- read_csv("data/pharmx-site-dimension.csv")
+# mapping_pharmx_site <- read_csv("data/mapping_pharmx_site.csv")
+# pharmx_products <- read_csv("data/pharmx-product-dimension.csv")
+# pharmx_orders_fy25 <- read_csv("data/pharmx-cw-nsw-allergy-orders-fy25.csv")
+# soh <- read_csv("data/fact_soh_alergy_cw_nsw_fs2025.csv")
+# t <- pos_transactions %>% 
+#   group_by(pfc) %>% 
+#   summarise(n=n())
+# mapping_pharmx_site <- read_csv("data/mapping_pharmx_site.csv")
+
+Dim_product_updated <- read_csv("data/Dim_product_updated.csv")
+Dim_store <- read_csv("data/Dim_store.csv")
+pos_transactions <- read_csv("data/fact_pos_alergy_cw_nsw_fs2025.csv")
+pos_transactions <- pos_transactions %>% 
+  rename(entity_id=eid)
+
+
+pos_transactions <- left_join(pos_transactions,Dim_store %>% select(entity_id,name))
+pos_transactions <- left_join(pos_transactions,Dim_product_updated %>% select(pfc,apn,pack_long_name))
+pos_transactions <- pos_transactions %>% 
+  mutate(GTIN = str_pad(apn,14,side="left"))
+
+```
+```{r}
+
+```
+
+```{r}
+date_sequence_daily <- data.frame(sale_date=seq(from = as.Date('2025-01-01'), to = as.Date('2025-12-12'), by = "day"))
+total_sales_by_product_by_store_day <- pos_transactions %>% 
+  group_by(name,GTIN,pack_long_name,sale_date) %>% 
+  summarise(sales =sum(unit),transactions=n()) %>% 
+  mutate(unitspertransaction=sales/transactions) %>% 
+  arrange(-sales)
+total_sales_by_product_by_store <- total_sales_by_product_by_store_day %>% 
+  group_by(name,GTIN,pack_long_name) %>% 
+  summarise(sales =sum(sales),transactions=sum(transactions)) %>% 
+  mutate(unitspertransaction=sales/transactions) %>% 
+  arrange(-sales)
+
+total_sales_by_product <- total_sales_by_product_by_store %>% 
+  group_by(GTIN,pack_long_name) %>% 
+  summarise(sales =sum(sales),transactions=sum(transactions)) %>% 
+  mutate(unitspertransaction=sales/transactions) %>% 
+  arrange(-sales)
+
+# use <- total_sales_by_product_by_store %>%
+#   filter(GTIN == total_sales_by_product$GTIN[1]) %>%
+#   select(name,GTIN)
+# use <- left_join(use[1,],total_sales_by_product_by_store_day)
+# use <- left_join(date_sequence_daily,use)
+# use$sales[is.na(use$sales)] <- 0
+
+
+```
+
+
+```{r}
+
+rows <- 200
+forecasts <- 10
+prob = 0.9
+
+fcast_df <- gen_all_forecasts(df=total_sales_by_product_by_store,rows = rows,forecasts = forecasts,prob=prob,quiet = T)
+write.csv(fcast_df,paste0("all_forecast_",rows,"_",forecasts,"_",prob,".csv"),row.names = F)
+
+```
+
+```{r}
+i <- 259
+
+```
+

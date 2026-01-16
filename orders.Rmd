@@ -1,0 +1,57 @@
+---
+title: "Untitled"
+output: html_document
+date: "2026-01-13"
+---
+
+```{r setup}
+knitr::opts_chunk$set(echo = TRUE)
+source("fns.R")
+```
+
+```{r}
+mapping_iqvia_site <- read_csv("data/mapping_iqvia_site.csv") %>% 
+  rename(pharmx_id=source_id)
+mapping_pharmx_site <- read_csv("data/mapping_pharmx_site.csv") %>% 
+  rename(iqvia_id=source_id)
+
+sites <- full_join(mapping_iqvia_site,mapping_pharmx_site,join_by(match_group_id==match_group_id))
+
+canonical_site <- read_csv("data/canonical_site.csv")
+sites <- full_join(sites,canonical_site)
+
+fact_soh_alergy_cw_nsw_fs2025 <- read_csv("data/fact_soh_alergy_cw_nsw_fs2025.csv")
+soh <- left_join(fact_soh_alergy_cw_nsw_fs2025,sites,join_by(entity_id==pharmx_id))
+
+Dim_product_updated <- read_csv("data/Dim_product_updated.csv") %>% 
+  mutate(gtin = str_pad(apn,14,side="left"))
+canonical_product <- read_csv("data/canonical_product.csv")
+
+products <- full_join(Dim_product_updated,canonical_product,join_by(gtin==gtin))
+
+
+soh <- left_join(soh,Dim_product_updated,join_by(pfc==pfc))
+
+pharmx_cw_nsw_allergy_orders_fy25 <- read_csv("data/pharmx-cw-nsw-allergy-orders-fy25.csv")
+
+
+
+```
+```{r}
+
+lead_times <- pharmx_cw_nsw_allergy_orders_fy25 %>%
+  group_by(PHARMX_SITE_ID, GTIN) %>%
+  summarise(order_lead_time = mean(
+    ORDER_LEAD_TIME_SECONDS / 3600,
+    na.rm = T),
+    std = sd(ORDER_LEAD_TIME_SECONDS / 3600, na.rm = T),
+    n = n()
+  )
+```
+```{r}
+df <- data.frame(avg_sales=seq(0.1,20,.1))
+df$p90 = qpois(.9,lambda = df$avg_sales)
+df %>% ggplot(aes(x=avg_sales,p90))+ geom_point()+ geom_line(aes(x=avg_sales,y=avg_sales))+geom_smooth(aes(x=avg_sales,y=p90/avg_sales))
+
+```
+
