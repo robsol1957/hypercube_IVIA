@@ -3,10 +3,10 @@ library(tidyverse)
 library(stringr)
 library(forecast)
 "https://drive.google.com/drive/u/1/folders/1r9ZoiurpGuBy8OxkeuF3EptEgSXcC6Nz"
-ewma.filter <- function (x, ratio, forecasts) {
-  init <- round(0.5 / ratio)
+ewma.filter <- function (x, lambda) {
+  init <- round(0.5 / lambda)
   init <- mean(x[1:init])
-  c(stats::filter(x * ratio, 1 - ratio, "recursive", init = init))
+  c(stats::filter(x * lambda, 1 - lambda, "recursive", init = init))
 }
 
 fit_forecast <- function(df, rows, forecasts) {
@@ -26,7 +26,7 @@ fit_forecast <- function(df, rows, forecasts) {
     } else {
       comment = paste0(comment, "lambda :", round(lambda, digits = 3))
     }
-    train$ewma <- ewma.filter(x = train$sales, ratio = lambda)
+    train$ewma <- ewma.filter(x = train$sales, lambda = lambda)
     train$resid <- train$ewma - train$sales
     train$last_Std_est <- roll::roll_sd(train$resid, 30)
     fcast <- forecast(fit, h = forecasts)
@@ -157,4 +157,121 @@ gen_all_forecasts <- function(df, rows, forecasts,prob,quiet=T) {
     }
   }
   all_fcast
+}
+
+get_lead_time <- function(df) {
+  df$cumprob <- cumsum(df$prob)
+  s <- runif(1, min = 0, max = , max(df$cumprob))
+  r <- df %>%
+    mutate(min = lag(cumprob), min = ifelse(is.na(min), 0, min)) %>%
+    filter(s < cumprob, s >= min)
+  as.numeric(r$days)
+}
+simulate <- function(target_stocks,
+                     avg_daily_sales,
+                     lead_times,
+                     min_batch
+) {
+  results <- data.frame(day = c(1:365))
+  
+  results$opening_stock = 0
+  results$received = 0
+  results$soh = 0
+  results$theoretic_sales =0
+  results$demand = 0
+  results$sales = 0
+  results$lost_sales = 0
+  results$on_order = 0
+  results$closing_stock = 0
+  results$orders = 0
+  results$lt = 0
+  results$dd = 0
+  results$closing_stock[1] <- target_stocks
+  for (day in 2:(nrow(results) - 1)) {
+    results$theoretic_sales[day] <- avg_daily_sales
+    results$opening_stock[day] <- results$closing_stock[day - 1]
+    results$soh[day] <- results$opening_stock[day] + results$received[day]
+    results$demand[day] <- rpois(1, avg_daily_sales)
+    if (results$demand[day] > results$soh[day]) {
+      results$sales[day] <- results$soh[day]
+      results$lost_sales[day] <- results$demand[day] - results$soh[day]
+    } else {
+      results$sales[day] <-  results$demand[day]
+      results$lost_sales[day]   <- 0
+    }
+    
+    
+    results$closing_stock[day] <- results$soh[day] -
+      results$sales[day]
+    outstanding_orders = results$on_order[day]-results$received[day]
+    pot_orders <- max(0, target_stocks - results$closing_stock[day]-outstanding_orders)
+    if (pot_orders >= min_batch) {
+      results$orders[day] = pot_orders
+    } else {
+      results$orders[day] = 0
+    }
+    results$lt[day] <- get_lead_time(lead_times)
+    
+    results$dd[day] = results$lt[day] + day
+    if (results$dd[day] <= nrow(results)) {
+      results$received[results$dd[day]] <- results$received[results$dd[day]] +
+        results$orders[day]
+    }
+    results$on_order[day + 1] = outstanding_orders + results$orders[day] 
+    
+  }
+  list(
+    results_df = results,
+    avg_stocks = mean(results$closing_stock),
+    sales = sum(results$sales),
+    lost_sales = sum(results$lost_sales),
+    theoretic_sales= sum(results$theoretic_sales),
+    avg_lt = sum(lead_times$days*lead_times$prob)/sum(lead_times$prob),
+    sd_lt = sd(results$lt)
+  )
+}
+
+
+run_simulation_stock_seq <- function(stock_seq,
+                                     avg_daily_sales,
+                                     lead_times,
+                                     min_batch) {
+  been_b4=FALSE
+  for (stocks in stock_seq) {
+    print(stocks)
+    results <- simulate(
+      target_stocks = stocks,
+      avg_daily_sales = avg_daily_sales,
+      lead_times = lead_times,
+      min_batch = min_batch
+    )
+    if (!been_b4) {
+      all_results <- data.frame(
+        target_stock = stocks,
+        avg_inv = results$avg_stocks,
+        sales = results$sales,
+        theoretic_sales = results$theoretic_sales,
+        lost_sales = results$lost_sales,
+        avg_lt = results$avg_lt,
+        sd_lt <- results$sd_lt       
+      )
+      been_b4=TRUE
+    } else {
+      all_results <- rbind(
+        all_results,
+        data.frame(
+          target_stock = stocks,
+          avg_inv = results$avg_stocks,
+          sales = results$sales,
+          theoretic_sales = results$theoretic_sales,
+          lost_sales = results$lost_sales,
+          avg_lt = results$avg_lt,
+          sd_lt <- results$sd_lt   
+        )
+      )
+    }
+  }
+  all_results$avg_daily_sales=avg_daily_sales
+  all_results$min_batch = min_batch
+  all_results
 }
